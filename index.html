@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Equation Grapher (Lines + Parabolas)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <style>
+      :root {
+        --bg: #0f1116;
+        --text: #e6e6e6;
+        --muted: #9aa3b2;
+        --panel-bg: #121522;
+        --panel-border: #252a3a;
+        --input-bg: #0d1020;
+        --accent: #1a1f33;
+        --border: #2f3650;
+      }
+      body.light {
+        --bg: #ffffff;
+        --text: #0b0e19;
+        --muted: #5b6070;
+        --panel-bg: #f6f7fb;
+        --panel-border: #d8dce8;
+        --input-bg: #ffffff;
+        --accent: #edf0fb;
+        --border: #c9d1e8;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .toolbar {
+        padding: 10px 12px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        background: var(--panel-bg);
+        border-bottom: 1px solid var(--panel-border);
+      }
+      .toolbar input[type="text"] {
+        width: 420px;
+        max-width: 90vw;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--input-bg);
+        color: var(--text);
+      }
+      .toolbar button, .toolbar select, .toolbar input[type="number"] {
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--accent);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .toolbar .hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .container {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+      #canvas-holder {
+        width: 100%;
+        height: calc(100vh - 68px);
+      }
+      .splitter { height: 8px; width: 1px; background: var(--panel-border); margin: 0 6px; }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <label for="equationInput"><strong>Equation</strong></label>
+      <input id="equationInput" type="text" placeholder="Examples: y=2x+3, y=-0.5x^2+3x-1, f(x)=x^2-4x+3" />
+      <button id="plotBtn">Plot</button>
+      <div class="splitter"></div>
+      <label>
+        Theme
+        <select id="themeSelect">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+      <div class="splitter"></div>
+      <span class="hint">Parabola y = ax^2 + bx + c:</span>
+      <input id="aInput" type="number" step="any" placeholder="a" style="width:80px" />
+      <input id="bInput" type="number" step="any" placeholder="b" style="width:80px" />
+      <input id="cInput" type="number" step="any" placeholder="c" style="width:80px" />
+      <button id="parabolaBtn">Use Parabola</button>
+      <label>
+        Zoom
+        <input id="zoomSlider" type="range" min="10" max="120" step="1" value="40" />
+      </label>
+      <button id="resetBtn">Reset View</button>
+      <span class="hint">Type y=... or f(x)=... (supports + − × ÷ ^ and parentheses)</span>
+    </div>
+    <div id="canvas-holder"></div>
+    <script src="./code.js"></script>
+  </body>
+</html>

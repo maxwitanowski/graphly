@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Equation Grapher (Lines + Parabolas)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <style>
+      html, body { height: 100%; }
+      :root {
+        /* Default to VS Code Dark+ */
+        --bg: #1e1e1e;
+        --text: #d4d4d4;
+        --muted: #9aa3b2;
+        --panel-bg: #252526;
+        --panel-border: #3c3c3c;
+        --input-bg: #1e1e1e;
+        --accent: #2d2d30;
+        --border: #3c3c3c;
+        /* Canvas + drawing colors */
+        --canvas-bg: #1e1e1e;
+        --grid-minor: rgba(255, 255, 255, 0.10);
+        --grid-major: rgba(255, 255, 255, 0.25);
+        --axis: #569cd6;
+        --plot: #ce9178;
+        --hud-bg: rgba(0, 0, 0, 0.70);
+        --hud-text: #e6e6e6;
+      }
+      /* VS Code themes */
+      body.theme-vscode-dark-plus {
+        --bg: #1e1e1e;
+        --text: #d4d4d4;
+        --muted: #b8c0dc;
+        --panel-bg: #252526;
+        --panel-border: #3c3c3c;
+        --input-bg: #1e1e1e;
+        --accent: #2d2d30;
+        --border: #3c3c3c;
+        --canvas-bg: #1e1e1e;
+        --grid-minor: rgba(255, 255, 255, 0.10);
+        --grid-major: rgba(255, 255, 255, 0.25);
+        --axis: #569cd6;
+        --plot: #ce9178;
+        --hud-bg: rgba(0, 0, 0, 0.70);
+        --hud-text: #e6e6e6;
+      }
+      body.theme-vscode-light-plus {
+        --bg: #ffffff;
+        --text: #333333;
+        --muted: #5b6070;
+        --panel-bg: #f3f3f3;
+        --panel-border: #e5e5e5;
+        --input-bg: #ffffff;
+        --accent: #eaeaea;
+        --border: #dcdcdc;
+        --canvas-bg: #ffffff;
+        --grid-minor: rgba(0, 0, 0, 0.08);
+        --grid-major: rgba(0, 0, 0, 0.25);
+        --axis: #007acc;
+        --plot: #e67e22;
+        --hud-bg: rgba(255, 255, 255, 0.92);
+        --hud-text: #0b0e19;
+      }
+      body.theme-monokai {
+        --bg: #272822;
+        --text: #f8f8f2;
+        --muted: #cfcfc2;
+        --panel-bg: #2d2e27;
+        --panel-border: #3e3d32;
+        --input-bg: #272822;
+        --accent: #3e3d32;
+        --border: #3e3d32;
+        --canvas-bg: #272822;
+        --grid-minor: rgba(255, 255, 255, 0.12);
+        --grid-major: rgba(255, 255, 255, 0.30);
+        --axis: #66d9ef;
+        --plot: #a6e22e;
+        --hud-bg: rgba(0, 0, 0, 0.70);
+        --hud-text: #f8f8f2;
+      }
+      body.theme-solarized-dark {
+        --bg: #002b36;
+        --text: #eee8d5;
+        --muted: #93a1a1;
+        --panel-bg: #073642;
+        --panel-border: #0b3a4a;
+        --input-bg: #002b36;
+        --accent: #0b3a4a;
+        --border: #0b3a4a;
+        --canvas-bg: #002b36;
+        --grid-minor: rgba(238, 232, 213, 0.15);
+        --grid-major: rgba(238, 232, 213, 0.35);
+        --axis: #268bd2;
+        --plot: #b58900;
+        --hud-bg: rgba(0, 0, 0, 0.60);
+        --hud-text: #eee8d5;
+      }
+      body.theme-solarized-light {
+        --bg: #fdf6e3;
+        --text: #657b83;
+        --muted: #586e75;
+        --panel-bg: #eee8d5;
+        --panel-border: #d6d1c4;
+        --input-bg: #ffffff;
+        --accent: #eae3cd;
+        --border: #d6d1c4;
+        --canvas-bg: #fdf6e3;
+        --grid-minor: rgba(0, 0, 0, 0.12);
+        --grid-major: rgba(0, 0, 0, 0.30);
+        --axis: #268bd2;
+        --plot: #b58900;
+        --hud-bg: rgba(255, 255, 255, 0.92);
+        --hud-text: #0b0e19;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .toolbar {
+        padding: 10px 12px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        background: var(--panel-bg);
+        border-bottom: 1px solid var(--panel-border);
+      }
+      .toolbar input[type="text"] {
+        width: 420px;
+        max-width: 90vw;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--input-bg);
+        color: var(--text);
+      }
+      .toolbar button, .toolbar select, .toolbar input[type="number"] {
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--accent);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .toolbar .hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .container {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+      #canvas-holder {
+        width: 100%;
+        height: calc(100dvh - 68px);
+      }
+      #canvas-holder, canvas { touch-action: none; }
+      .splitter { height: 8px; width: 1px; background: var(--panel-border); margin: 0 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar" class="toolbar">
+      
+      <label>
+        Theme
+        <select id="themeSelect">
+          <option value="vscode-dark-plus">VS Code Dark+</option>
+          <option value="vscode-light-plus">VS Code Light+</option>
+          <option value="monokai">Monokai</option>
+          <option value="solarized-dark">Solarized Dark</option>
+          <option value="solarized-light">Solarized Light</option>
+        </select>
+      </label>
+      <div class="splitter"></div>
+      <span class="hint">Lines:</span>
+      <button id="addLineBtn" title="Add line">+</button>
+      <span id="linesContainer"></span>
+      
+      <label>
+        Zoom
+        <input id="zoomSlider" type="range" min="10" max="120" step="1" value="40" />
+      </label>
+      <button id="resetBtn">Reset View</button>
+      <span class="hint">Type y=... or f(x)=... (supports + − × ÷ ^ and parentheses)</span>
+    </div>
+    <div id="canvas-holder"></div>
+    <script src="./code.js"></script>
+  </body>
+</html>

@@ -34,6 +34,18 @@ let aInput; let bInput; let cInput;
 let quadMode; let faInput; let fbInput; let r1Input; let r2Input;
 let canvasParent;
 let toolbarEl;
+let leftPanelEl;
+let plotPanelHeaderEl;
+let isDraggingPanel = false;
+let panelDragOffsetX = 0;
+let panelDragOffsetY = 0;
+let minimizeBtnEl;
+let toolboxBtnEl;
+let toolboxDrawerEl;
+// Removed tool chips: we embed the Plot Point panel only
+let toolboxBtnLabelEl;
+let toolboxEmbeddedAreaEl;
+let toolboxCloseEl;
 let lastTouchX = 0;
 let lastTouchY = 0;
 let lastPinchDistance = null;
@@ -62,12 +74,68 @@ let axisLabelRects = {
 const maxExtraLines = 3;
 let extraLines = [];
 
+// User-placed markers on lines
+// { id, lineId, x: worldX, y: worldY, label, color?, size? }
+let markers = [];
+
+// Drag state for markers
+let draggingMarkerId = null;
+
+// Two-point lines tool
+// { id, p1:{x,y}, p2:{x,y}, color, name }
+let twoPointLines = [];
+let draggingTwoPoint = { lineId: null, pointKey: null };
+let toolLine2ChipEl;
+let twoPointDotsHidden = false;
+
+// Parabolas tool (three points define a parabola)
+// { id, p1:{x,y}, p2:{x,y}, p3:{x,y}, color, name, a, b, c }
+let parabolas = [];
+let parabolaDotsHidden = false;
+let isDraggingParabolaPanel = false;
+let parabolaDragOffsetX = 0;
+let parabolaDragOffsetY = 0;
+// Dragging a parabola vertex
+let draggingParabolaId = null;
+// Dragging an x-intercept (root) of a parabola
+let draggingParabolaRoot = { id: null, which: null };
+// Snapped cursor target (if hovering near a handle)
+let snappedCursor = null;
+
 function setup() {
   canvasParent = document.getElementById('canvas-holder');
+  leftPanelEl = document.getElementById('left-panel');
+  plotPanelHeaderEl = document.getElementById('plotPanelHeader');
   toolbarEl = document.getElementById('toolbar');
+  minimizeBtnEl = document.getElementById('minimizePlotPanel');
+  toolboxBtnEl = document.getElementById('toolboxBtn');
+  toolboxDrawerEl = document.getElementById('toolboxDrawer');
+  // no chips now
+  toolboxBtnLabelEl = document.getElementById('toolboxBtnLabel');
+  toolboxEmbeddedAreaEl = document.getElementById('toolboxEmbeddedArea');
+  toolboxCloseEl = document.getElementById('toolboxClose');
   updateCanvasHolderSize();
   const c = createCanvas(canvasParent.clientWidth, canvasParent.clientHeight);
   c.parent(canvasParent);
+
+  // Ensure both tools start in toolbox
+  if (toolboxEmbeddedAreaEl && leftPanelEl) {
+    leftPanelEl.classList.add('embedded');
+    leftPanelEl.style.display = 'block';
+    const toolboxContent = document.querySelector('.toolbox-content');
+    (toolboxContent || toolboxEmbeddedAreaEl).appendChild(leftPanelEl);
+    if (toolboxDrawerEl) toolboxDrawerEl.style.display = 'block';
+  }
+  const l2 = document.getElementById('line2Tool');
+  if (l2 && toolboxEmbeddedAreaEl) {
+    const toolboxContent = document.querySelector('.toolbox-content');
+    (toolboxContent || toolboxEmbeddedAreaEl).appendChild(l2);
+  }
+  const ptool = document.getElementById('parabolaTool');
+  if (ptool && toolboxEmbeddedAreaEl) {
+    const toolboxContent = document.querySelector('.toolbox-content');
+    (toolboxContent || toolboxEmbeddedAreaEl).appendChild(ptool);
+  }
 
   // Initial origin at canvas center
   originX = width / 2;
@@ -126,6 +194,345 @@ function setup() {
     });
   }
 
+  // Left panel: plot a point by coordinates
+  const addPointBtn = document.getElementById('addPointBtn');
+  const pointX = document.getElementById('pointX');
+  const pointY = document.getElementById('pointY');
+  const pointLabel = document.getElementById('pointLabel');
+  const pointColor = document.getElementById('pointColor');
+  const pointSize = document.getElementById('pointSize');
+  const pointList = document.getElementById('pointList');
+  if (addPointBtn && pointX && pointY) {
+    addPointBtn.addEventListener('click', () => {
+      const x = parseFloat(pointX.value || '0');
+      const y = parseFloat(pointY.value || '0');
+      const label = (pointLabel && pointLabel.value) ? pointLabel.value : '';
+      const color = (pointColor && pointColor.value) ? pointColor.value : '#ffd166';
+      const size = Math.max(2, Math.min(24, parseInt(pointSize?.value || '6', 10)));
+      // Create a standalone marker (lineId null) with its own color
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+      markers.push({ id, lineId: null, x, y, label: String(label).slice(0, 60), color, size });
+      renderPointList(pointList);
+    });
+  }
+
+  // Two-point line tool wiring
+  const line2AddBtn = document.getElementById('line2AddBtn');
+  const line2SpawnBtn = document.getElementById('line2SpawnBtn');
+  const line2ToggleDotsBtn = document.getElementById('line2ToggleDotsBtn');
+  const line2x1 = document.getElementById('line2x1');
+  const line2y1 = document.getElementById('line2y1');
+  const line2x2 = document.getElementById('line2x2');
+  const line2y2 = document.getElementById('line2y2');
+  const line2Color = document.getElementById('line2Color');
+  const line2List = document.getElementById('line2List');
+  if (line2AddBtn && line2x1 && line2y1 && line2x2 && line2y2) {
+    line2AddBtn.addEventListener('click', () => {
+      const p1 = { x: parseFloat(line2x1.value || '0'), y: parseFloat(line2y1.value || '0') };
+      const p2 = { x: parseFloat(line2x2.value || '1'), y: parseFloat(line2y2.value || '1') };
+      const color = (line2Color && line2Color.value) ? line2Color.value : '#66d9ef';
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+      // Respect math coordinates entered: screen y increases down, so convert from math to internal world
+      // Inputs are already in world coords (math). We store directly and let rendering convert.
+      twoPointLines.push({ id, p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, color, name: '' });
+      renderLine2List(line2List);
+    });
+  }
+  if (line2SpawnBtn) {
+    line2SpawnBtn.addEventListener('click', () => {
+      const centerX = screenToWorldX(width / 2);
+      const centerY = screenToWorldY(height / 2);
+      const color = (line2Color && line2Color.value) ? line2Color.value : '#66d9ef';
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+      // Spawn near center in world coords
+      twoPointLines.push({ id, p1: { x: centerX - 2, y: centerY - 1 }, p2: { x: centerX + 2, y: centerY + 1 }, color, name: '' });
+      renderLine2List(line2List);
+    });
+  }
+  if (line2ToggleDotsBtn) {
+    let dotsHidden = false;
+    line2ToggleDotsBtn.addEventListener('click', () => {
+      dotsHidden = !dotsHidden;
+      line2ToggleDotsBtn.textContent = dotsHidden ? 'Show dots' : 'Hide dots';
+      twoPointDotsHidden = dotsHidden;
+    });
+  }
+
+  // Parabola tool wiring
+  const paraAddBtn = document.getElementById('paraAddBtn');
+  const paraSpawnBtn = document.getElementById('paraSpawnBtn');
+  const paraToggleDotsBtn = document.getElementById('paraToggleDotsBtn');
+  const paraX1 = document.getElementById('paraX1');
+  const paraX2 = document.getElementById('paraX2');
+  const paraVY = document.getElementById('paraVY');
+  const paraColor = document.getElementById('paraColor');
+  const paraList = document.getElementById('paraList');
+  if (paraAddBtn && paraX1 && paraX2) {
+    paraAddBtn.addEventListener('click', () => {
+      const r1In = parseFloat(paraX1.value || '0');
+      const r2In = parseFloat(paraX2.value || '1');
+      const halfSpan = (r2In - r1In) / 2;
+      const vx = (r1In + r2In) / 2;
+      const r1 = vx - halfSpan;
+      const r2 = vx + halfSpan;
+      const color = (paraColor && paraColor.value) ? paraColor.value : '#e67e22';
+      const denom = (vx - r1) * (vx - r2);
+      const vyProvided = (paraVY && paraVY.value !== '') ? Math.round(parseFloat(paraVY.value)) : (1 * denom);
+      const a = Math.abs(denom) > 1e-12 ? (vyProvided / denom) : 1;
+      const coeffs = computeQuadraticFromRoots(r1, r2, a);
+      const vy = Math.round(coeffs.a * denom);
+      const p1 = { x: r1, y: 0 };
+      const p2 = { x: r2, y: 0 };
+      const p3 = { x: vx, y: vy };
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+      parabolas.push({ id, p1, p2, p3, color, name: '', ...coeffs });
+      renderParabolaList(paraList);
+    });
+  }
+  if (paraSpawnBtn) {
+    paraSpawnBtn.addEventListener('click', () => {
+      const cx = screenToWorldX(width / 2);
+      const color = (paraColor && paraColor.value) ? paraColor.value : '#e67e22';
+      const r1In = (paraX1 && paraX1.value !== '') ? parseFloat(paraX1.value) : (cx - 1);
+      const r2In = (paraX2 && paraX2.value !== '') ? parseFloat(paraX2.value) : (cx + 1);
+      const halfSpan = (r2In - r1In) / 2;
+      const vx = (r1In + r2In) / 2;
+      const r1 = vx - halfSpan;
+      const r2 = vx + halfSpan;
+      const denom = (vx - r1) * (vx - r2);
+      const vyProvided = (paraVY && paraVY.value !== '') ? Math.round(parseFloat(paraVY.value)) : (1 * denom);
+      const a = Math.abs(denom) > 1e-12 ? (vyProvided / denom) : 1;
+      const coeffs = computeQuadraticFromRoots(r1, r2, a);
+      const vy = Math.round(coeffs.a * denom);
+      const p1 = { x: r1, y: 0 };
+      const p2 = { x: r2, y: 0 };
+      const p3 = { x: vx, y: vy };
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+      parabolas.push({ id, p1, p2, p3, color, name: '', ...coeffs });
+      renderParabolaList(paraList);
+    });
+  }
+  if (paraToggleDotsBtn) {
+    let dotsHidden = false;
+    paraToggleDotsBtn.addEventListener('click', () => {
+      dotsHidden = !dotsHidden;
+      paraToggleDotsBtn.textContent = dotsHidden ? 'Show dots' : 'Hide dots';
+      parabolaDotsHidden = dotsHidden;
+    });
+  }
+
+  // Make Parabola tool draggable out of the toolbox
+  const parabolaTool = document.getElementById('parabolaTool');
+  const parabolaHeader = document.getElementById('parabolaHeader');
+  const dockParabolaPanel = document.getElementById('dockParabolaPanel');
+  if (parabolaTool && parabolaHeader) {
+    const startParaDrag = (clientX, clientY) => {
+      if (!parabolaTool.classList.contains('tool-floating')) {
+        const rect = parabolaTool.getBoundingClientRect();
+        document.body.appendChild(parabolaTool);
+        parabolaTool.classList.add('tool-floating');
+        parabolaTool.style.left = rect.left + 'px';
+        parabolaTool.style.top = rect.top + 'px';
+      }
+      const r2 = parabolaTool.getBoundingClientRect();
+      isDraggingParabolaPanel = true;
+      parabolaDragOffsetX = clientX - r2.left;
+      parabolaDragOffsetY = clientY - r2.top;
+    };
+    parabolaHeader.addEventListener('mousedown', (e) => { startParaDrag(e.clientX, e.clientY); e.preventDefault(); e.stopPropagation(); });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingParabolaPanel) return;
+      const x = Math.max(0, Math.min(window.innerWidth - parabolaTool.offsetWidth, e.clientX - parabolaDragOffsetX));
+      const y = Math.max((toolbarEl ? toolbarEl.offsetHeight + 4 : 0), Math.min(window.innerHeight - parabolaTool.offsetHeight, e.clientY - parabolaDragOffsetY));
+      parabolaTool.style.left = x + 'px';
+      parabolaTool.style.top = y + 'px';
+    });
+    window.addEventListener('mouseup', (e) => { isDraggingParabolaPanel = false; e?.stopPropagation?.(); });
+    // Touch support
+    parabolaHeader.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length === 0) return;
+      const t = e.touches[0];
+      startParaDrag(t.clientX, t.clientY); e.preventDefault(); e.stopPropagation();
+    }, { passive: false });
+    window.addEventListener('touchmove', (e) => {
+      if (!isDraggingParabolaPanel || !e.touches || e.touches.length === 0) return;
+      const t = e.touches[0];
+      const x = Math.max(0, Math.min(window.innerWidth - parabolaTool.offsetWidth, t.clientX - parabolaDragOffsetX));
+      const y = Math.max((toolbarEl ? toolbarEl.offsetHeight + 4 : 0), Math.min(window.innerHeight - parabolaTool.offsetHeight, t.clientY - parabolaDragOffsetY));
+      parabolaTool.style.left = x + 'px';
+      parabolaTool.style.top = y + 'px';
+      e.preventDefault(); e.stopPropagation();
+    }, { passive: false });
+    window.addEventListener('touchend', (e) => { isDraggingParabolaPanel = false; e?.stopPropagation?.(); });
+
+    if (dockParabolaPanel && toolboxEmbeddedAreaEl) {
+      dockParabolaPanel.addEventListener('click', () => {
+        const toolboxContent = document.querySelector('.toolbox-content');
+        (toolboxContent || toolboxEmbeddedAreaEl).appendChild(parabolaTool);
+        parabolaTool.classList.remove('tool-floating');
+        parabolaTool.style.left = '';
+        parabolaTool.style.top = '';
+        if (toolboxDrawerEl) toolboxDrawerEl.style.display = 'block';
+      });
+    }
+  }
+
+  // Removed Line chip; Two-Point Line panel is draggable by header
+
+  // Make Two-Point Line panel draggable out of the toolbox like Plot Point
+  const line2Tool = document.getElementById('line2Tool');
+  const line2Header = document.getElementById('line2Header');
+  const dockLine2Panel = document.getElementById('dockLine2Panel');
+  let draggingLine2Panel = false;
+  let line2OffsetX = 0;
+  let line2OffsetY = 0;
+  if (line2Tool && line2Header) {
+    const startDrag = (clientX, clientY) => {
+      if (!line2Tool.classList.contains('tool-floating')) {
+        const rect = line2Tool.getBoundingClientRect();
+        document.body.appendChild(line2Tool);
+        line2Tool.classList.add('tool-floating');
+        line2Tool.style.left = rect.left + 'px';
+        line2Tool.style.top = rect.top + 'px';
+      }
+      const rect2 = line2Tool.getBoundingClientRect();
+      draggingLine2Panel = true;
+      line2OffsetX = clientX - rect2.left;
+      line2OffsetY = clientY - rect2.top;
+    };
+    line2Header.addEventListener('mousedown', (e) => { startDrag(e.clientX, e.clientY); e.preventDefault(); e.stopPropagation(); });
+    window.addEventListener('mousemove', (e) => {
+      if (!draggingLine2Panel) return;
+      const x = Math.max(0, Math.min(window.innerWidth - line2Tool.offsetWidth, e.clientX - line2OffsetX));
+      const y = Math.max((toolbarEl ? toolbarEl.offsetHeight + 4 : 0), Math.min(window.innerHeight - line2Tool.offsetHeight, e.clientY - line2OffsetY));
+      line2Tool.style.left = x + 'px';
+      line2Tool.style.top = y + 'px';
+    });
+    window.addEventListener('mouseup', (e) => { draggingLine2Panel = false; if (e) e.stopPropagation?.(); });
+    // Touch
+    line2Header.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length === 0) return;
+      const t = e.touches[0];
+      startDrag(t.clientX, t.clientY);
+      e.preventDefault(); e.stopPropagation();
+    }, { passive: false });
+    window.addEventListener('touchmove', (e) => {
+      if (!draggingLine2Panel || !e.touches || e.touches.length === 0) return;
+      const t = e.touches[0];
+      const x = Math.max(0, Math.min(window.innerWidth - line2Tool.offsetWidth, t.clientX - line2OffsetX));
+      const y = Math.max((toolbarEl ? toolbarEl.offsetHeight + 4 : 0), Math.min(window.innerHeight - line2Tool.offsetHeight, t.clientY - line2OffsetY));
+      line2Tool.style.left = x + 'px';
+      line2Tool.style.top = y + 'px';
+      e.preventDefault(); e.stopPropagation();
+    }, { passive: false });
+    window.addEventListener('touchend', (e) => { draggingLine2Panel = false; if (e) e.stopPropagation?.(); });
+    // Dock
+    if (dockLine2Panel && toolboxEmbeddedAreaEl) {
+      dockLine2Panel.addEventListener('click', () => {
+        // Place next to other tools inside the toolbox content, not stacked
+        const toolboxContent = document.querySelector('.toolbox-content');
+        (toolboxContent || toolboxEmbeddedAreaEl).appendChild(line2Tool);
+        line2Tool.classList.remove('tool-floating');
+        line2Tool.style.left = '';
+        line2Tool.style.top = '';
+        if (toolboxDrawerEl) toolboxDrawerEl.style.display = 'block';
+      });
+    }
+  }
+
+  // Draggable left panel
+  if (leftPanelEl && plotPanelHeaderEl) {
+    plotPanelHeaderEl.addEventListener('mousedown', (e) => {
+      // If panel is embedded in toolbox, pop it out before dragging
+      if (leftPanelEl.classList && leftPanelEl.classList.contains('embedded')) {
+        const rectBefore = leftPanelEl.getBoundingClientRect();
+        document.body.appendChild(leftPanelEl);
+      leftPanelEl.classList.remove('embedded');
+        leftPanelEl.style.position = 'absolute';
+        leftPanelEl.style.left = rectBefore.left + 'px';
+        leftPanelEl.style.top = rectBefore.top + 'px';
+      // Do not auto-close toolbox anymore
+      }
+      isDraggingPanel = true;
+      const rect = leftPanelEl.getBoundingClientRect();
+      panelDragOffsetX = e.clientX - rect.left;
+      panelDragOffsetY = e.clientY - rect.top;
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingPanel) return;
+      const x = Math.max(0, Math.min(window.innerWidth - leftPanelEl.offsetWidth, e.clientX - panelDragOffsetX));
+      const y = Math.max(toolbarEl ? toolbarEl.offsetTop + toolbarEl.offsetHeight + 4 : 0, Math.min(window.innerHeight - leftPanelEl.offsetHeight, e.clientY - panelDragOffsetY));
+      leftPanelEl.style.left = x + 'px';
+      leftPanelEl.style.top = y + 'px';
+    });
+    window.addEventListener('mouseup', () => { isDraggingPanel = false; });
+
+    // Touch support
+    plotPanelHeaderEl.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length === 0) return;
+      if (leftPanelEl.classList && leftPanelEl.classList.contains('embedded')) {
+        const rectBefore = leftPanelEl.getBoundingClientRect();
+        document.body.appendChild(leftPanelEl);
+      leftPanelEl.classList.remove('embedded');
+        leftPanelEl.style.position = 'absolute';
+        leftPanelEl.style.left = rectBefore.left + 'px';
+        leftPanelEl.style.top = rectBefore.top + 'px';
+      // Do not auto-close toolbox anymore
+      }
+      isDraggingPanel = true;
+      const t = e.touches[0];
+      const rect = leftPanelEl.getBoundingClientRect();
+      panelDragOffsetX = t.clientX - rect.left;
+      panelDragOffsetY = t.clientY - rect.top;
+      e.preventDefault();
+    }, { passive: false });
+    window.addEventListener('touchmove', (e) => {
+      if (!isDraggingPanel || !e.touches || e.touches.length === 0) return;
+      const t = e.touches[0];
+      const x = Math.max(0, Math.min(window.innerWidth - leftPanelEl.offsetWidth, t.clientX - panelDragOffsetX));
+      const y = Math.max(toolbarEl ? toolbarEl.offsetTop + toolbarEl.offsetHeight + 4 : 0, Math.min(window.innerHeight - leftPanelEl.offsetHeight, t.clientY - panelDragOffsetY));
+      leftPanelEl.style.left = x + 'px';
+      leftPanelEl.style.top = y + 'px';
+      e.preventDefault();
+    }, { passive: false });
+    window.addEventListener('touchend', () => { isDraggingPanel = false; });
+  }
+
+  // Minimize panel to toolbox (only moves panel when you click the minimize button)
+  if (minimizeBtnEl && leftPanelEl) {
+    minimizeBtnEl.addEventListener('click', () => {
+      if (toolboxEmbeddedAreaEl) {
+        leftPanelEl.classList.add('embedded');
+        // Reset inline positioning so it appears correctly inside the toolbox
+        leftPanelEl.style.position = '';
+        leftPanelEl.style.left = '';
+        leftPanelEl.style.top = '';
+        leftPanelEl.style.display = 'block';
+        const toolboxContent = document.querySelector('.toolbox-content');
+        (toolboxContent || toolboxEmbeddedAreaEl).appendChild(leftPanelEl);
+        if (toolboxDrawerEl) toolboxDrawerEl.style.display = 'block';
+      } else {
+        leftPanelEl.style.display = 'none';
+        if (toolboxDrawerEl) toolboxDrawerEl.style.display = 'block';
+      }
+    });
+  }
+
+  // Toolbox toggle
+  if (toolboxBtnEl && toolboxDrawerEl) {
+    const toggle = () => {
+      const isOpen = toolboxDrawerEl.style.display !== 'none';
+      toolboxDrawerEl.style.display = isOpen ? 'none' : 'block';
+    };
+    toolboxBtnEl.addEventListener('click', toggle);
+    if (toolboxCloseEl) toolboxCloseEl.addEventListener('click', toggle);
+  }
+
+  // Chips removed; panel can be dragged out by grabbing its header (implemented above)
+
+  // Note: Tools do not auto-move when opening/closing toolbox. Drag them in/out explicitly.
+
   // Initialize theme from saved preference and wire up selector
   const savedTheme = localStorage.getItem('themeKey') || 'vscode-dark-plus';
   themeSelect.value = savedTheme;
@@ -137,6 +544,8 @@ function setup() {
   // Removed legacy quadratic toolbar. Quadratic options will be provided per-line in the Lines UI.
 
   // No initial equation parsing (primary equation removed)
+  // Wire custom label popover
+  setupLabelPopover();
 }
 
 function windowResized() {
@@ -149,11 +558,69 @@ function draw() {
   background(themeColors.canvasBg);
   drawGridAndAxes();
   drawExtraCurves();
-  const hover = findNearestOnExtraLines(mouseX, mouseY);
-  if (hover) {
-    drawHoverTip(hover);
+  drawTwoPointLines();
+  drawParabolas();
+
+  // Hover prioritization: markers first (snap), then lines (extra + two-point)
+  snappedCursor = null;
+  const hoverMarker = findNearestMarker(mouseX, mouseY);
+  if (hoverMarker) {
+    cursor('pointer');
+    drawHoverTip({
+      sx: hoverMarker.sx,
+      sy: hoverMarker.sy,
+      xWorld: hoverMarker.x,
+      yWorld: hoverMarker.y,
+      rgb: hoverMarker.rgb
+    });
+    snappedCursor = { sx: hoverMarker.sx, sy: hoverMarker.sy };
+  } else {
+    // Snap to two-point endpoints first for better UX
+    const endpoint = findNearestTwoPointEndpoint(mouseX, mouseY);
+    if (endpoint) {
+      cursor('pointer');
+      drawHoverTip({ sx: endpoint.sx, sy: endpoint.sy, xWorld: endpoint.x, yWorld: endpoint.y, rgb: endpoint.rgb });
+      snappedCursor = { sx: endpoint.sx, sy: endpoint.sy };
+    } else {
+      // Snap to parabola handles (vertex and roots) or the curve itself
+      const nearV = findNearestParabolaVertex(mouseX, mouseY);
+      const nearR = findNearestParabolaRoot(mouseX, mouseY);
+      const nearCurve = findNearestOnParabolas(mouseX, mouseY);
+      if (nearV && (!nearR || Math.hypot(mouseX - nearV.sx, mouseY - nearV.sy) <= Math.hypot(mouseX - nearR.sx, mouseY - nearR.sy))) {
+        cursor('pointer');
+        drawHoverTip({ sx: nearV.sx, sy: nearV.sy, xWorld: screenToWorldX(nearV.sx), yWorld: screenToWorldY(nearV.sy), rgb: hexToRgb('#e67e22') });
+        snappedCursor = { sx: nearV.sx, sy: nearV.sy };
+      } else if (nearR) {
+        cursor('pointer');
+        drawHoverTip({ sx: nearR.sx, sy: nearR.sy, xWorld: screenToWorldX(nearR.sx), yWorld: screenToWorldY(nearR.sy), rgb: hexToRgb('#e67e22') });
+        snappedCursor = { sx: nearR.sx, sy: nearR.sy };
+      } else if (nearCurve) {
+        cursor('crosshair');
+        drawHoverTip({ sx: nearCurve.sx, sy: nearCurve.sy, xWorld: nearCurve.xWorld, yWorld: nearCurve.yWorld, rgb: hexToRgb(nearCurve.pbRef?.color || '#e67e22') });
+        snappedCursor = { sx: nearCurve.sx, sy: nearCurve.sy };
+      } else {
+        const hover = findNearestOnExtraLines(mouseX, mouseY);
+        if (hover) {
+          cursor('crosshair');
+          drawHoverTip(hover);
+        } else {
+          cursor('default');
+        }
+      }
+    }
   }
+
+  drawMarkers(hoverMarker ? hoverMarker.id : null);
   drawHUD();
+  // Render snapped cursor if available
+  if (snappedCursor) {
+    push();
+    noFill();
+    stroke(themeColors.axis);
+    strokeWeight(1);
+    circle(snappedCursor.sx, snappedCursor.sy, 12);
+    pop();
+  }
 }
 
 function drawGridAndAxes() {
@@ -306,6 +773,143 @@ function drawExtraCurves() {
   }
 }
 
+function drawMarkers(highlightId = null) {
+  if (!markers.length) return;
+  textSize(12);
+  for (const m of markers) {
+    const ln = m.lineId ? extraLines.find(e => e.id === m.lineId) : null;
+    const rgb = m.color ? hexToRgb(m.color) : (ln ? hexToRgb(ln.color || '#ff8800') : { r: 255, g: 255, b: 255 });
+    const sx = worldToScreenX(m.x);
+    const sy = worldToScreenY(m.y);
+    // Marker point
+    stroke(rgb.r, rgb.g, rgb.b, 255);
+    const baseSize = Number.isFinite(m.size) ? m.size : 6;
+    strokeWeight(m.id === highlightId ? 3 : 2);
+    fill(themeColors.canvasBg);
+    circle(sx, sy, (m.id === highlightId ? baseSize + 2 : baseSize));
+    // Label
+    noStroke();
+    fill(themeColors.hudText);
+    textAlign(LEFT, BOTTOM);
+    const coord = `(${m.x.toFixed(2)}, ${m.y.toFixed(2)})`;
+    const label = m.label ? `${m.label} ${coord}` : coord;
+    text(label, sx + 8, sy - 6);
+  }
+}
+
+function drawTwoPointLines() {
+  if (!twoPointLines.length) return;
+  for (const ln of twoPointLines) {
+    const rgb = hexToRgb(ln.color || '#66d9ef');
+    // Draw infinite line through p1 and p2
+    const x1w = ln.p1.x; const y1w = ln.p1.y; const x2w = ln.p2.x; const y2w = ln.p2.y;
+    if (!(x1w === x2w && y1w === y2w)) {
+      stroke(rgb.r, rgb.g, rgb.b, 255);
+      strokeWeight(2);
+      if (Math.abs(x2w - x1w) < 1e-9) {
+        const sx = worldToScreenX(x1w);
+        line(sx, 0, sx, height);
+      } else {
+        const m = (y2w - y1w) / (x2w - x1w);
+        const leftX = screenToWorldX(0);
+        const rightX = screenToWorldX(width);
+        const yLeft = m * (leftX - x1w) + y1w;
+        const yRight = m * (rightX - x1w) + y1w;
+        const sx1 = worldToScreenX(leftX);
+        const sy1 = worldToScreenY(yLeft);
+        const sx2 = worldToScreenX(rightX);
+        const sy2 = worldToScreenY(yRight);
+        line(sx1, sy1, sx2, sy2);
+      }
+    }
+    // Endpoints as draggable handles (optional)
+    if (!twoPointDotsHidden) {
+      fill(themeColors.canvasBg);
+      stroke(rgb.r, rgb.g, rgb.b, 255);
+      strokeWeight(2);
+      const x1 = worldToScreenX(ln.p1.x);
+      const y1 = worldToScreenY(ln.p1.y);
+      const x2 = worldToScreenX(ln.p2.x);
+      const y2 = worldToScreenY(ln.p2.y);
+      circle(x1, y1, 8);
+      circle(x2, y2, 8);
+    }
+    if (ln.name && ln.name.trim() !== '') {
+      noStroke();
+      fill(themeColors.hudText);
+      textSize(12);
+      textAlign(LEFT, BOTTOM);
+      text(ln.name, x2 + 8, y2 - 6);
+    }
+  }
+}
+
+function computeQuadraticThroughPoints(p1, p2, p3) {
+  const x1 = p1.x, y1 = p1.y;
+  const x2 = p2.x, y2 = p2.y;
+  const x3 = p3.x, y3 = p3.y;
+  const denom = (x1 - x2) * (x1 - x3) * (x2 - x3);
+  if (Math.abs(denom) < 1e-12) return null;
+  const a = (x3*(y2 - y1) + x2*(y1 - y3) + x1*(y3 - y2)) / denom;
+  const b = (x3*x3*(y1 - y2) + x2*x2*(y3 - y1) + x1*x1*(y2 - y3)) / denom;
+  const c = (x2*x3*(x2 - x3)*y1 + x3*x1*(x3 - x1)*y2 + x1*x2*(x1 - x2)*y3) / denom;
+  return { a, b, c };
+}
+
+// Build quadratic coefficients from roots r1 and r2 and a vertical scale k (a)
+function computeQuadraticFromRoots(r1, r2, k) {
+  const a = Number(k);
+  const b = -a * (r1 + r2);
+  const c = a * r1 * r2;
+  return { a, b, c };
+}
+
+function drawParabolas() {
+  if (!parabolas.length) return;
+  for (const pb of parabolas) {
+    const rgb = hexToRgb(pb.color || '#e67e22');
+    stroke(rgb.r, rgb.g, rgb.b, 255);
+    strokeWeight(2);
+    noFill();
+    const stepPx = 2;
+    let moveToNext = true;
+    let prevX = 0, prevY = 0;
+    for (let px = 0; px <= width; px += stepPx) {
+      const xw = screenToWorldX(px);
+      const yw = pb.a * xw * xw + pb.b * xw + pb.c;
+      const sy = worldToScreenY(yw);
+      if (moveToNext) {
+        prevX = px; prevY = sy; moveToNext = false; continue;
+      }
+      line(prevX, prevY, px, sy);
+      prevX = px; prevY = sy;
+    }
+    if (!parabolaDotsHidden) {
+      fill(themeColors.canvasBg);
+      stroke(rgb.r, rgb.g, rgb.b, 255);
+      strokeWeight(2);
+      if (pb.p1) circle(worldToScreenX(pb.p1.x), worldToScreenY(0), 8);
+      if (pb.p2) circle(worldToScreenX(pb.p2.x), worldToScreenY(0), 8);
+      if (pb.p3) {
+        const vx = worldToScreenX(pb.p3.x);
+        const vy = worldToScreenY(pb.p3.y);
+        circle(vx, vy, 10);
+        // small handle indicator line upwards
+        line(vx, vy - 10, vx, vy - 18);
+      }
+    }
+    if (pb.name && pb.name.trim() !== '') {
+      noStroke();
+      fill(themeColors.hudText);
+      textSize(12);
+      textAlign(LEFT, BOTTOM);
+      const lx = pb.p3 ? worldToScreenX(pb.p3.x) : worldToScreenX((pb.p1.x + pb.p2.x) / 2);
+      const ly = pb.p3 ? worldToScreenY(pb.p3.y) : worldToScreenY(0);
+      text(pb.name, lx + 8, ly - 6);
+    }
+  }
+}
+
 // Draw a function y = f(x) by sampling across the canvas width
 function drawFunctionLine(fn) {
   noFill();
@@ -338,13 +942,15 @@ function drawFunctionLine(fn) {
 // Find nearest point on any extra line to the given mouse position (in screen coords)
 function findNearestOnExtraLines(mouseScreenX, mouseScreenY) {
   if (isDragging) return null;
-  if (!extraLines || extraLines.length === 0) return null;
+  const hasExtra = Array.isArray(extraLines) && extraLines.length > 0;
+  const hasTwoPoint = Array.isArray(twoPointLines) && twoPointLines.length > 0;
+  if (!hasExtra && !hasTwoPoint) return null;
 
   const thresholdPx = 10; // hover distance in pixels
   let best = null;
   let bestDist = Infinity;
 
-  for (const lineDef of extraLines) {
+  for (const lineDef of (extraLines || [])) {
     const fn = getExtraLineFunction(lineDef);
     const rgb = hexToRgb(lineDef.color || '#ff8800');
     const stepPx = 2;
@@ -362,7 +968,7 @@ function findNearestOnExtraLines(mouseScreenX, mouseScreenY) {
       const sx = px;
       const sy = worldToScreenY(yWorld);
       if (havePrev) {
-        const proj = distancePointToSegment(mouseScreenX, mouseScreenY, prevX, prevY, sx, sy);
+      const proj = distancePointToSegment(mouseScreenX, mouseScreenY, prevX, prevY, sx, sy);
         if (proj.dist < bestDist) {
           bestDist = proj.dist;
           best = {
@@ -370,7 +976,7 @@ function findNearestOnExtraLines(mouseScreenX, mouseScreenY) {
             sy: proj.y,
             xWorld: screenToWorldX(proj.x),
             yWorld: screenToWorldY(proj.y),
-            rgb,
+          rgb,
             lineRef: lineDef
           };
         }
@@ -381,8 +987,268 @@ function findNearestOnExtraLines(mouseScreenX, mouseScreenY) {
     }
   }
 
+  // Also consider two-point lines (infinite across canvas)
+  for (const ln of twoPointLines) {
+    const rgb = hexToRgb(ln.color || '#66d9ef');
+    const stepPx = 2;
+    if (Math.abs(ln.p2.x - ln.p1.x) < 1e-9) {
+      // Vertical line: x = const, sample along y
+      const sx = worldToScreenX(ln.p1.x);
+      let havePrev = false; let prevX = sx; let prevY = 0;
+      for (let py = 0; py <= height; py += stepPx) {
+        const sy = py;
+        if (havePrev) {
+          const proj = distancePointToSegment(mouseScreenX, mouseScreenY, prevX, prevY, sx, sy);
+          if (proj.dist < bestDist) {
+            bestDist = proj.dist;
+            best = {
+              sx: proj.x,
+              sy: proj.y,
+              xWorld: screenToWorldX(proj.x),
+              yWorld: screenToWorldY(proj.y),
+              rgb,
+              lineRef: ln,
+              lineType: 'line2',
+              colorHex: ln.color || '#66d9ef'
+            };
+          }
+        }
+        prevX = sx; prevY = sy; havePrev = true;
+      }
+    } else {
+      const m = (ln.p2.y - ln.p1.y) / (ln.p2.x - ln.p1.x);
+      const b = ln.p1.y - m * ln.p1.x;
+      let havePrev = false; let prevX = 0; let prevY = 0;
+      for (let px = 0; px <= width; px += stepPx) {
+        const xWorld = screenToWorldX(px);
+        const yWorld = m * xWorld + b;
+        const sx = px;
+        const sy = worldToScreenY(yWorld);
+        if (havePrev) {
+          const proj = distancePointToSegment(mouseScreenX, mouseScreenY, prevX, prevY, sx, sy);
+          if (proj.dist < bestDist) {
+            bestDist = proj.dist;
+            best = {
+              sx: proj.x,
+              sy: proj.y,
+              xWorld: screenToWorldX(proj.x),
+              yWorld: screenToWorldY(proj.y),
+              rgb,
+              lineRef: ln,
+              lineType: 'line2',
+              colorHex: ln.color || '#66d9ef'
+            };
+          }
+        }
+        prevX = sx; prevY = sy; havePrev = true;
+      }
+    }
+  }
+
   if (best && bestDist <= thresholdPx) return best;
   return null;
+}
+
+// Find nearest point on any parabola to the given mouse position (in screen coords)
+function findNearestOnParabolas(mouseScreenX, mouseScreenY) {
+  if (isDragging) return null;
+  if (!Array.isArray(parabolas) || parabolas.length === 0) return null;
+
+  const thresholdPx = 10;
+  const mxWorld = screenToWorldX(mouseScreenX);
+  const myWorld = screenToWorldY(mouseScreenY);
+  let best = null;
+  let bestPixDist = Infinity;
+
+  for (const pb of parabolas) {
+    // sample segments in world x using screen px as step to stay dense visually
+    const stepPx = 4;
+    for (let px = 0; px <= width - stepPx; px += stepPx) {
+      const x1w = screenToWorldX(px);
+      const y1w = pb.a * x1w * x1w + pb.b * x1w + pb.c;
+      const x2w = screenToWorldX(px + stepPx);
+      const y2w = pb.a * x2w * x2w + pb.b * x2w + pb.c;
+      const proj = distancePointToSegment(mxWorld, myWorld, x1w, y1w, x2w, y2w);
+      const projSx = worldToScreenX(proj.x);
+      const projSy = worldToScreenY(proj.y);
+      const dPix = Math.hypot(mouseScreenX - projSx, mouseScreenY - projSy);
+      if (dPix < bestPixDist) {
+        bestPixDist = dPix;
+        best = { sx: projSx, sy: projSy, xWorld: proj.x, yWorld: proj.y, pbRef: pb };
+      }
+    }
+  }
+  if (!best || bestPixDist > thresholdPx) return null;
+  return best;
+}
+
+// Find nearest marker to the cursor for snapping
+function findNearestMarker(mouseScreenX, mouseScreenY) {
+  if (isDragging || markers.length === 0) return null;
+  const thresholdPx = 12;
+  let best = null;
+  let bestDist = Infinity;
+  for (const m of markers) {
+    const sx = worldToScreenX(m.x);
+    const sy = worldToScreenY(m.y);
+    const d = Math.hypot(mouseScreenX - sx, mouseScreenY - sy);
+    if (d < bestDist) {
+      bestDist = d;
+      const ln = m.lineId ? extraLines.find(e => e.id === m.lineId) : null;
+      best = {
+        id: m.id,
+        x: m.x,
+        y: m.y,
+        sx,
+        sy,
+        rgb: m.color ? hexToRgb(m.color) : (ln ? hexToRgb(ln.color || '#ff8800') : { r: 255, g: 255, b: 255 })
+      };
+    }
+  }
+  if (best && bestDist <= thresholdPx) return best;
+  return null;
+}
+
+function findNearestTwoPointEndpoint(mouseScreenX, mouseScreenY) {
+  if (!twoPointLines.length) return null;
+  const thresholdPx = 10;
+  let best = null;
+  let bestDist = Infinity;
+  for (const ln of twoPointLines) {
+    const endpoints = [
+      { key: 'p1', x: ln.p1.x, y: ln.p1.y, sx: worldToScreenX(ln.p1.x), sy: worldToScreenY(ln.p1.y) },
+      { key: 'p2', x: ln.p2.x, y: ln.p2.y, sx: worldToScreenX(ln.p2.x), sy: worldToScreenY(ln.p2.y) }
+    ];
+    for (const ep of endpoints) {
+      const d = Math.hypot(mouseScreenX - ep.sx, mouseScreenY - ep.sy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { lineId: ln.id, pointKey: ep.key, sx: ep.sx, sy: ep.sy, x: ep.x, y: ep.y, rgb: hexToRgb(ln.color || '#66d9ef') };
+      }
+    }
+  }
+  return bestDist <= thresholdPx ? best : null;
+}
+
+function findNearestParabolaVertex(mouseScreenX, mouseScreenY) {
+  if (!parabolas.length) return null;
+  const thresholdPx = 10;
+  let best = null;
+  let bestDist = Infinity;
+  for (const pb of parabolas) {
+    if (!pb.p3) continue;
+    const sx = worldToScreenX(pb.p3.x);
+    const sy = worldToScreenY(pb.p3.y);
+    const d = Math.hypot(mouseScreenX - sx, mouseScreenY - sy);
+    if (d < bestDist) {
+      bestDist = d;
+      best = { id: pb.id, sx, sy };
+    }
+  }
+  return bestDist <= thresholdPx ? best : null;
+}
+
+function findNearestParabolaRoot(mouseScreenX, mouseScreenY) {
+  if (!parabolas.length) return null;
+  const thresholdPx = 10;
+  let best = null;
+  let bestDist = Infinity;
+  for (const pb of parabolas) {
+    const points = [
+      { which: 'p1', x: pb.p1?.x, y: 0 },
+      { which: 'p2', x: pb.p2?.x, y: 0 }
+    ];
+    for (const pt of points) {
+      if (typeof pt.x !== 'number') continue;
+      const sx = worldToScreenX(pt.x);
+      const sy = worldToScreenY(0);
+      const d = Math.hypot(mouseScreenX - sx, mouseScreenY - sy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { id: pb.id, which: pt.which, sx, sy };
+      }
+    }
+  }
+  return bestDist <= thresholdPx ? best : null;
+}
+
+function renderLine2List(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  twoPointLines.forEach((ln) => {
+    const row = document.createElement('div');
+    row.className = 'line2-row';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = 'Name';
+    nameInput.value = ln.name || '';
+    nameInput.addEventListener('input', () => {
+      ln.name = nameInput.value.slice(0, 40);
+    });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'del-btn';
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', () => {
+      twoPointLines = twoPointLines.filter(x => x.id !== ln.id);
+      renderLine2List(container);
+    });
+    row.appendChild(nameInput);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+function renderParabolaList(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  parabolas.forEach((pb) => {
+    const row = document.createElement('div');
+    row.className = 'line2-row';
+    // Inline name box next to the shape entry
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = 'name';
+    nameInput.value = pb.name || '';
+    nameInput.addEventListener('input', () => {
+      pb.name = nameInput.value.slice(0, 40);
+    });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'del-btn';
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', () => {
+      parabolas = parabolas.filter(x => x.id !== pb.id);
+      renderParabolaList(container);
+    });
+    row.appendChild(nameInput);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+function renderPointList(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  markers.forEach((m) => {
+    const row = document.createElement('div');
+    row.className = 'line2-row';
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.placeholder = 'label';
+    labelInput.value = m.label || '';
+    labelInput.addEventListener('input', () => {
+      m.label = labelInput.value.slice(0, 60);
+    });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'del-btn';
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', () => {
+      markers = markers.filter(x => x.id !== m.id);
+      renderPointList(container);
+    });
+    row.appendChild(labelInput);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
 }
 
 // Draw a small marker and tooltip with coordinates at the hover point
@@ -455,8 +1321,60 @@ function drawHUD() {
   text(label, 17, height - 19);
 }
 
+// ----- Custom label popover for marker creation -----
+let labelPopoverEl = null;
+let labelInputEl = null;
+let labelOkBtnEl = null;
+let labelCancelBtnEl = null;
+let pendingLabelPoint = null; // { xWorld, yWorld }
+
+function setupLabelPopover() {
+  labelPopoverEl = document.getElementById('labelPopover');
+  labelInputEl = document.getElementById('labelInput');
+  labelOkBtnEl = document.getElementById('labelOkBtn');
+  labelCancelBtnEl = document.getElementById('labelCancelBtn');
+  if (!labelPopoverEl || !labelInputEl || !labelOkBtnEl || !labelCancelBtnEl) return;
+  const submit = () => {
+    if (!pendingLabelPoint) { hideLabelPopover(); return; }
+    const text = String(labelInputEl.value || '').slice(0, 60);
+    const id = Date.now() + '-' + Math.random().toString(36).slice(2,7);
+    markers.push({ id, lineId: null, x: pendingLabelPoint.xWorld, y: pendingLabelPoint.yWorld, label: text });
+    hideLabelPopover();
+  };
+  const cancel = () => { hideLabelPopover(); };
+  labelOkBtnEl.addEventListener('click', submit);
+  labelCancelBtnEl.addEventListener('click', cancel);
+  labelInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+    if (e.key === 'Escape') cancel();
+  });
+}
+
+function showLabelPopover(screenX, screenY, xWorld, yWorld, preset = '') {
+  if (!labelPopoverEl) return;
+  pendingLabelPoint = { xWorld, yWorld };
+  labelInputEl.value = preset;
+  labelPopoverEl.style.display = 'flex';
+  const rect = labelPopoverEl.getBoundingClientRect();
+  const left = Math.min(Math.max(8, screenX + 12), window.innerWidth - rect.width - 8);
+  const top = Math.min(Math.max(8, screenY + 12), window.innerHeight - rect.height - 8);
+  labelPopoverEl.style.left = left + 'px';
+  labelPopoverEl.style.top = top + 'px';
+  setTimeout(() => labelInputEl.focus(), 0);
+}
+
+function hideLabelPopover() {
+  if (!labelPopoverEl) return;
+  labelPopoverEl.style.display = 'none';
+  pendingLabelPoint = null;
+}
+
 // Mouse interactions for panning
 function mousePressed() {
+  // If clicking inside UI (panel or toolbar), ignore canvas interactions
+  if (isPointerInUi(window.event)) {
+    return; // do NOT return false here; it prevents default and blocks input focus
+  }
   // Detect clicks on axis labels to edit before starting drag
   const mx = mouseX;
   const my = mouseY;
@@ -471,11 +1389,39 @@ function mousePressed() {
     return;
   }
 
-  // Click near a line to set its label
-  const hit = findNearestOnExtraLines(mx, my);
-  if (hit && hit.lineRef) {
-    const next = prompt('Name this line:', hit.lineRef.label || '');
-    if (next !== null) hit.lineRef.label = String(next).slice(0, 40);
+  // Try to start dragging a marker first
+  const nearMarker = findNearestMarker(mx, my);
+  if (nearMarker) {
+    draggingMarkerId = nearMarker.id;
+    return;
+  }
+
+  // Start dragging a two-point line endpoint if near
+  const nearEndpoint = findNearestTwoPointEndpoint(mx, my);
+  if (nearEndpoint) {
+    draggingTwoPoint = { lineId: nearEndpoint.lineId, pointKey: nearEndpoint.pointKey };
+    return;
+  }
+
+  // Start dragging a parabola vertex if near
+  const nearVertex = findNearestParabolaVertex(mx, my);
+  if (nearVertex) {
+    draggingParabolaId = nearVertex.id;
+    return;
+  }
+
+  // Start dragging a parabola root if near (x-axis only)
+  const nearRoot = findNearestParabolaRoot(mx, my);
+  if (nearRoot) {
+    draggingParabolaRoot = { id: nearRoot.id, which: nearRoot.which };
+    return;
+  }
+
+  // Click near a line to set its label or add marker using custom popover
+  let hit = findNearestOnExtraLines(mx, my);
+  if (!hit) hit = findNearestOnParabolas(mx, my);
+  if (hit) {
+    showLabelPopover(hit.sx, hit.sy, hit.xWorld, hit.yWorld, '');
     return;
   }
 
@@ -485,6 +1431,71 @@ function mousePressed() {
 }
 
 function mouseDragged() {
+  if (isDraggingPanel) return; // do not pan while moving panel
+  // Dragging a marker
+  if (draggingMarkerId) {
+    const marker = markers.find(m => m.id === draggingMarkerId);
+    if (!marker) return;
+    // Convert current mouse to world coords and snap to grid step 1
+    const wx = screenToWorldX(mouseX);
+    const wy = screenToWorldY(mouseY);
+    marker.x = Math.round(wx);
+    marker.y = Math.round(wy);
+    return;
+  }
+  // Dragging a two-point endpoint
+  if (draggingTwoPoint && draggingTwoPoint.lineId) {
+    const ln = twoPointLines.find(l => l.id === draggingTwoPoint.lineId);
+    if (ln) {
+      const wx = screenToWorldX(mouseX);
+      const wy = screenToWorldY(mouseY);
+      const snapX = Math.round(wx);
+      const snapY = Math.round(wy);
+      if (draggingTwoPoint.pointKey === 'p1') { ln.p1.x = snapX; ln.p1.y = snapY; }
+      if (draggingTwoPoint.pointKey === 'p2') { ln.p2.x = snapX; ln.p2.y = snapY; }
+    }
+    return;
+  }
+  // Dragging a parabola vertex up/down (x fixed at midpoint between roots)
+  if (draggingParabolaId) {
+    const pb = parabolas.find(p => p.id === draggingParabolaId);
+    if (pb) {
+      const vx = pb.p3.x; // fixed
+      const wy = Math.round(screenToWorldY(mouseY));
+      const r1 = pb.p1.x;
+      const r2 = pb.p2.x;
+      const denom = (vx - r1) * (vx - r2);
+      const a = Math.abs(denom) > 1e-12 ? (wy / denom) : pb.a;
+      const coeffs = computeQuadraticFromRoots(r1, r2, a);
+      pb.a = coeffs.a; pb.b = coeffs.b; pb.c = coeffs.c;
+      pb.p3 = { x: vx, y: wy };
+      const vyInput = document.getElementById('paraVY');
+      if (vyInput) vyInput.value = String(wy);
+    }
+    return;
+  }
+  // Dragging a parabola root along x-axis only
+  if (draggingParabolaRoot && draggingParabolaRoot.id && draggingParabolaRoot.which) {
+    const pb = parabolas.find(p => p.id === draggingParabolaRoot.id);
+    if (pb) {
+      const wx = Math.round(screenToWorldX(mouseX));
+      const r1 = draggingParabolaRoot.which === 'p1' ? wx : pb.p1.x;
+      const r2 = draggingParabolaRoot.which === 'p2' ? wx : pb.p2.x;
+      // Update points
+      if (draggingParabolaRoot.which === 'p1') pb.p1.x = wx;
+      if (draggingParabolaRoot.which === 'p2') pb.p2.x = wx;
+      // Vertex x is midpoint; keep current vertex y; recompute a to maintain vertex y
+      const vx = (r1 + r2) / 2;
+      const vy = pb.p3 ? pb.p3.y : 0;
+      const denom = (vx - r1) * (vx - r2);
+      const a = Math.abs(denom) > 1e-12 ? (vy / denom) : pb.a;
+      const coeffs = computeQuadraticFromRoots(r1, r2, a);
+      pb.a = coeffs.a; pb.b = coeffs.b; pb.c = coeffs.c;
+      pb.p3 = { x: vx, y: vy };
+    }
+    return;
+  }
+  // Panning
   if (!isDragging) return;
   const dx = mouseX - lastMouseX;
   const dy = mouseY - lastMouseY;
@@ -496,10 +1507,16 @@ function mouseDragged() {
 
 function mouseReleased() {
   isDragging = false;
+  draggingMarkerId = null;
+  isDraggingPanel = false;
+  draggingTwoPoint = { lineId: null, pointKey: null };
+  draggingParabolaId = null;
+  draggingParabolaRoot = { id: null, which: null };
 }
 
 // Smooth zoom with mouse wheel centered at cursor
 function mouseWheel(event) {
+  if (isPointerInUi(event)) return false; // keep page scroll prevented if on canvas, but ignore UI
   const zoomIntensity = 1.08; // per wheel notch
   const mouseScreenX = mouseX;
   const mouseScreenY = mouseY;
@@ -517,6 +1534,9 @@ function mouseWheel(event) {
 // Touch support: drag and pinch-to-zoom
 function touchStarted() {
   if (touches.length === 1) {
+    if (isTouchInUi()) {
+      return false;
+    }
     // Tap to rename axis labels
     const tx = touches[0].x;
     const ty = touches[0].y;
@@ -527,6 +1547,22 @@ function touchStarted() {
     } else if (pointInRect(tx, ty, axisLabelRects.y)) {
       const next = prompt('Rename y-axis label:', axisLabels.y || 'y');
       if (next !== null) axisLabels.y = String(next).slice(0, 20);
+      return false;
+    }
+    // Check if touching an existing marker for drag
+    const nearMarker = findNearestMarker(tx, ty);
+    if (nearMarker) {
+      draggingMarkerId = nearMarker.id;
+      isDragging = true;
+      lastTouchX = tx;
+      lastTouchY = ty;
+      return false;
+    }
+    // Tap near a line or parabola to add a marker via popover
+    let hit = findNearestOnExtraLines(tx, ty);
+    if (!hit) hit = findNearestOnParabolas(tx, ty);
+    if (hit) {
+      showLabelPopover(hit.sx, hit.sy, hit.xWorld, hit.yWorld, '');
       return false;
     }
     isDragging = true;
@@ -540,13 +1576,24 @@ function touchStarted() {
 }
 
 function touchMoved() {
+  if (isDraggingPanel) return false;
   if (touches.length === 1 && isDragging) {
-    const dx = touches[0].x - lastTouchX;
-    const dy = touches[0].y - lastTouchY;
-    originX += dx;
-    originY += dy;
-    lastTouchX = touches[0].x;
-    lastTouchY = touches[0].y;
+    if (draggingMarkerId) {
+      const marker = markers.find(m => m.id === draggingMarkerId);
+      if (marker) {
+        const wx = screenToWorldX(touches[0].x);
+        const wy = screenToWorldY(touches[0].y);
+        marker.x = Math.round(wx);
+        marker.y = Math.round(wy);
+      }
+    } else {
+      const dx = touches[0].x - lastTouchX;
+      const dy = touches[0].y - lastTouchY;
+      originX += dx;
+      originY += dy;
+      lastTouchX = touches[0].x;
+      lastTouchY = touches[0].y;
+    }
   } else if (touches.length >= 2) {
     const newDistance = dist(touches[0].x, touches[0].y, touches[1].x, touches[1].y);
     if (lastPinchDistance !== null && lastPinchDistance > 0) {
@@ -565,11 +1612,13 @@ function touchEnded() {
   if (touches.length === 0) {
     isDragging = false;
     lastPinchDistance = null;
+    draggingMarkerId = null;
   }
   return false;
 }
 
 function setZoom(newPixelsPerUnit, centerScreenX, centerScreenY) {
+  if (isPointerInUi(window.event)) return; // don't zoom when pointer is over UI
   // Keep the world coordinate under the cursor fixed while zooming
   const worldXBefore = screenToWorldX(centerScreenX);
   const worldYBefore = screenToWorldY(centerScreenY);
@@ -595,6 +1644,34 @@ function getCssVar(varName) {
 function pointInRect(px, py, rect) {
   if (!rect) return false;
   return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+}
+
+function isPointerInUi(evt) {
+  const e = evt || window.event;
+  if (!e) return false;
+  let target = e.target;
+  while (target) {
+    if (
+      target === leftPanelEl ||
+      target === toolbarEl ||
+      target === toolboxBtnEl ||
+      target === toolboxDrawerEl ||
+      target === labelPopoverEl ||
+      (target.classList && (target.classList.contains('left-panel') || target.classList.contains('toolbox-btn') || target.classList.contains('toolbox-drawer') || target.classList.contains('toolbox-content') || target.classList.contains('tool-chip') || target.classList.contains('tool-card')))
+    ) {
+      return true;
+    }
+    target = target.parentElement;
+  }
+  return false;
+}
+
+function isTouchInUi() {
+  // Basic hit test: if the first touch point is inside the left panel rect
+  if (!leftPanelEl || !touches || touches.length === 0) return false;
+  const rect = leftPanelEl.getBoundingClientRect();
+  const t = touches[0];
+  return t.clientX >= rect.left && t.clientX <= rect.right && t.clientY >= rect.top && t.clientY <= rect.bottom;
 }
 
 function applyTheme(themeKey) {

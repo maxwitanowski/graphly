@@ -148,14 +148,106 @@
         color: var(--muted);
         font-size: 12px;
       }
-      .container {
-        display: grid;
-        grid-template-columns: 1fr;
+      .container { display: grid; grid-template-columns: 1fr; }
+      .main-wrap { position: relative; }
+      .left-panel {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        width: 220px;
+        padding: 12px;
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        z-index: 10;
+        touch-action: none;
       }
-      #canvas-holder {
-        width: 100%;
-        height: calc(100dvh - 68px);
+      .toolbox-btn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); color: var(--text); border-radius: 12px; padding: 6px 10px; cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,0.25); z-index: 12; user-select: none; font-size: 28px; line-height: 1; }
+      .toolbox-drawer { position: fixed; left: 0; right: 0; bottom: 0; height: 25vh; background: var(--panel-bg); border-top: 1px solid var(--panel-border); box-shadow: 0 -2px 12px rgba(0,0,0,0.35); z-index: 12; user-select: none; display: flex; align-items: flex-start; }
+      .toolbox-content { width: 100%; height: 100%; padding: 10px 14px; display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: nowrap; overflow-x: auto; }
+      .toolbox-close { position: absolute; top: -26px; left: 50%; transform: translateX(-50%); background: var(--panel-bg); color: var(--text); border: 1px solid var(--panel-border); border-radius: 10px; padding: 2px 8px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+      .tool-chip { display: inline-block; padding: 8px 12px; border-radius: 999px; background: var(--accent); border: 1px solid var(--border); color: var(--text); cursor: grab; box-shadow: 0 2px 6px rgba(0,0,0,0.18); }
+      .tool-chip:hover { filter: brightness(1.06); }
+      .tool-card { padding: 10px 12px; border-radius: 12px; background: var(--accent); border: 1px solid var(--border); color: var(--text); cursor: grab; min-width: 140px; box-shadow: 0 2px 6px rgba(0,0,0,0.18); }
+      .tool-floating { position: absolute; top: 12px; left: 12px; width: 220px; padding: 10px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.25); display: flex; flex-direction: column; gap: 10px; z-index: 11; touch-action: none; }
+      .left-panel.embedded { position: static; left: auto; top: auto; width: 220px; box-shadow: none; border: 1px solid var(--panel-border); border-radius: 12px; }
+      /* Lift cards inside the toolbox so they feel raised */
+      .toolbox-content .left-panel.embedded,
+      .toolbox-content #line2Tool {
+        box-shadow: 0 12px 28px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.22);
+        border-color: rgba(255,255,255,0.06);
       }
+      .panel-header { color: var(--text); font-weight: 700; cursor: move; user-select: none; -webkit-user-select: none; display:flex; align-items:center; justify-content: space-between; }
+      .panel-actions { display: flex; align-items:center; gap: 6px; }
+      .icon-btn { cursor: pointer; background: var(--accent); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; line-height: 1; }
+      .icon-btn:hover { filter: brightness(1.08); }
+      .left-panel label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+      .left-panel input[type="text"], .left-panel input[type="number"], .left-panel input[type="color"] {
+        padding: 8px 10px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text);
+      }
+      .left-panel input::placeholder { color: var(--muted); opacity: 0.9; }
+      .left-panel input:focus { outline: 2px solid rgba(255,255,255,0.08); border-color: var(--panel-border); }
+      .left-panel button { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--accent); color: var(--text); cursor: pointer; }
+      /* Unify tool card sizing and inputs to match left panel */
+      #line2Tool { width: 1000px; padding: 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.25); display:flex; flex-direction:column; gap: 12px; box-sizing: border-box; }
+      #line2Tool label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+      #line2Tool input[type="text"], #line2Tool input[type="number"], #line2Tool input[type="color"] { padding: 8px 10px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text); }
+      #line2Tool input::placeholder { color: var(--muted); opacity: 0.9; }
+      #line2Tool input:focus { outline: 2px solid rgba(255,255,255,0.08); border-color: var(--panel-border); }
+      .tool-btn { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--accent); color: var(--text); cursor: pointer; white-space: nowrap; }
+      .btn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .btn-row .tool-btn { margin-bottom: 4px; }
+      /* Parabola tool styling to match others */
+      #parabolaTool { padding: 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.25); display:flex; flex-direction:column; gap: 12px; box-sizing: border-box; }
+      #parabolaTool label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+      #parabolaTool input[type="text"], #parabolaTool input[type="number"], #parabolaTool input[type="color"] { padding: 8px 10px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text); }
+      #parabolaTool input::placeholder { color: var(--muted); opacity: 0.9; }
+      #parabolaTool input:focus { outline: 2px solid rgba(255,255,255,0.08); border-color: var(--panel-border); }
+      /* Plot point list for deletion */
+      .pp-list { display:flex; flex-direction:column; gap:8px; }
+      /* Two-point lines list */
+      .line2-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+      .line2-row { display: flex; align-items: center; gap: 6px; }
+      .line2-row input[type="text"] { flex: 1; padding: 8px 10px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text); }
+      .del-btn { 
+        padding: 0; 
+        border-radius: 8px; 
+        border: 1px solid #7a2323 !important; 
+        background: #b33636 !important; 
+        color: #fff !important; 
+        cursor: pointer; 
+        width: 34px; 
+        height: 34px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        line-height: 1; 
+        font-size: 18px; 
+      }
+      .del-btn:hover { filter: brightness(1.05); }
+      /* Label popover for placing markers */
+      .label-popover { position: fixed; z-index: 20; padding: 8px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 10px; box-shadow: 0 6px 16px rgba(0,0,0,0.35); display: none; gap: 6px; align-items: center; }
+      .label-popover input[type="text"] { padding: 8px 10px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text); min-width: 180px; }
+      .label-popover button { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--accent); color: var(--text); cursor: pointer; }
+      /* Match toolbox forms to panel input styling */
+      #line2Tool label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+      #line2Tool input[type="text"],
+      #line2Tool input[type="number"],
+      #line2Tool input[type="color"] {
+        padding: 8px 10px;
+        height: 32px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--input-bg);
+        color: var(--text);
+      }
+      #line2Tool input::placeholder { color: var(--muted); opacity: 0.9; }
+      #line2Tool input:focus { outline: 2px solid rgba(255,255,255,0.08); border-color: var(--panel-border); }
+      #canvas-holder { width: 100%; height: calc(100dvh - 68px); }
       #canvas-holder, canvas { touch-action: none; }
       .splitter { height: 8px; width: 1px; background: var(--panel-border); margin: 0 6px; }
     </style>
@@ -185,7 +277,67 @@
       <button id="resetBtn">Reset View</button>
       <span class="hint">Type y=... or f(x)=... (supports + − × ÷ ^ and parentheses)</span>
     </div>
-    <div id="canvas-holder"></div>
+    <div id="main-wrap" class="main-wrap">
+        <div id="left-panel" class="left-panel" style="display:none;">
+        <div id="plotPanelHeader" class="panel-header">Plot Point
+          <span class="panel-actions" style="float:right; margin-top:-2px;">
+            <button id="minimizePlotPanel" class="icon-btn" title="Dock to toolbox">▾</button>
+          </span>
+        </div>
+        <label> X <input id="pointX" type="number" step="any" /> </label>
+        <label> Y <input id="pointY" type="number" step="any" /> </label>
+        <label> Label <input id="pointLabel" type="text" placeholder="optional" /> </label>
+        <label> Size <input id="pointSize" type="number" min="2" max="24" step="1" value="6" /> </label>
+        <label> Color <input id="pointColor" type="color" value="#ffd166" /> </label>
+        <button id="addPointBtn">Add Point</button>
+        <div id="pointList" class="pp-list"></div>
+      </div>
+      <div id="canvas-holder"></div>
+    </div>
+      <div id="toolboxBtn" class="toolbox-btn" title="Toolbox">🧰</div>
+      <div id="toolboxDrawer" class="toolbox-drawer" style="display:none;">
+        <div id="toolboxClose" class="toolbox-close" title="Close">▾</div>
+        <div class="toolbox-content">
+          <div id="toolboxEmbeddedArea" style="flex: 0 0 auto;"></div>
+          <div id="line2Tool" style="display:flex; flex-direction:column; gap:6px; max-width:240px;">
+            <div id="line2Header" class="panel-header">Two-Point Line
+              <span class="panel-actions"><button id="dockLine2Panel" class="icon-btn" title="Dock to toolbox">▾</button></span>
+            </div>
+            <label style="font-size:12px; color: var(--muted);">x1 <input id="line2x1" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">y1 <input id="line2y1" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">x2 <input id="line2x2" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">y2 <input id="line2y2" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">Color <input id="line2Color" type="color" value="#66d9ef" /></label>
+            <div class="btn-row">
+              <button id="line2AddBtn" class="tool-btn">Add by coords</button>
+              <button id="line2SpawnBtn" class="tool-btn">Add line</button>
+              <button id="line2ToggleDotsBtn" class="tool-btn">Hide dots</button>
+            </div>
+            <div id="line2List" class="line2-list"></div>
+          </div>
+
+          <div id="parabolaTool" style="display:flex; flex-direction:column; gap:6px; width:320px; max-width:320px;">
+            <div id="parabolaHeader" class="panel-header">Three-Point Parabola
+              <span class="panel-actions"><button id="dockParabolaPanel" class="icon-btn" title="Dock to toolbox">▾</button></span>
+            </div>
+            <label style="font-size:12px; color: var(--muted);">x1 <input id="paraX1" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">x2 <input id="paraX2" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">Vertex y <input id="paraVY" type="number" step="any" /></label>
+            <label style="font-size:12px; color: var(--muted);">Color <input id="paraColor" type="color" value="#e67e22" /></label>
+            <div class="btn-row">
+              <button id="paraAddBtn" class="tool-btn">Add by coords</button>
+              <button id="paraSpawnBtn" class="tool-btn">Add parabola</button>
+              <button id="paraToggleDotsBtn" class="tool-btn">Hide dots</button>
+            </div>
+            <div id="paraList" class="line2-list"></div>
+          </div>
+          <div id="labelPopover" class="label-popover">
+            <input id="labelInput" type="text" placeholder="Label" />
+            <button id="labelOkBtn">OK</button>
+            <button id="labelCancelBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
     <script src="./code.js"></script>
   </body>
 </html>
